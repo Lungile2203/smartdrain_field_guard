@@ -1,0 +1,24 @@
+name: smartdrain_field
+description: "Smart Drainage Guard - field worker app (report drains, manage jobs)"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  mqtt_client: ^10.2.1        # talks to the HiveMQ broker (same one as the sensor + website)
+  geolocator: ^13.0.1         # GPS location
+  image_picker: ^1.1.2        # camera photo
+  url_launcher: ^6.3.0        # Google Maps directions + WhatsApp share
+  shared_preferences: ^2.3.2  # remembers settings + reports waiting for signal
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

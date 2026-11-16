@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drainage Guard Workers</title>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f6f8; --panel: #ffffff; --ink: #14202b; --muted: #5b6b79; --line: #dfe5ea;
+    --ok: #12805c; --ok-bg: #e3f4ec; --warn: #b26a00; --warn-bg: #fff1d9;
+    --crit: #c0262d; --crit-bg: #fde4e4; --block: #6b3fb5; --block-bg: #efe7fb;
+    --off: #6b7785; --off-bg: #eceff2; --accent: #0b6e99;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e151b; --panel: #16212a; --ink: #e6edf2; --muted: #93a4b2; --line: #26343f;
+      --ok: #3ccf95; --ok-bg: #133328; --warn: #f2b14c; --warn-bg: #3a2c12;
+      --crit: #ff6b6f; --crit-bg: #3d1a1c; --block: #b89af0; --block-bg: #2a2140;
+      --off: #8c99a6; --off-bg: #222d36; --accent: #5cc1ee;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+           padding: 16px 24px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  h1 small { display: block; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pill { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; background: var(--off-bg); color: var(--off); }
+  .pill.on { background: var(--ok-bg); color: var(--ok); }
+  .pill.demo { background: var(--warn-bg); color: var(--warn); }
+  button { font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { padding: 20px 24px 40px; max-width: 1280px; margin: 0 auto; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .kpi b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 18px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; align-content: start; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; border-top: 4px solid var(--ok); }
+  .card.warn { border-top-color: var(--warn); } .card.crit { border-top-color: var(--crit); }
+  .card.block { border-top-color: var(--block); } .card.off { border-top-color: var(--off); opacity: .75; }
+  .card h3 { margin: 0; font-size: 15px; } .card .id { font-size: 12px; color: var(--muted); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; text-transform: uppercase; letter-spacing: .5px; }
+  .b-ok { background: var(--ok-bg); color: var(--ok); } .b-warn { background: var(--warn-bg); color: var(--warn); }
+  .b-crit { background: var(--crit-bg); color: var(--crit); } .b-block { background: var(--block-bg); color: var(--block); }
+  .b-off { background: var(--off-bg); color: var(--off); }
+  .big { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 8px 0 2px; }
+  .big small { font-size: 14px; color: var(--muted); font-weight: 500; }
+  .gauge { position: relative; height: 10px; border-radius: 99px; background: var(--off-bg); margin: 8px 0 4px; overflow: hidden; }
+  .gauge i { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--ok); transition: width .6s; }
+  .card.warn .gauge i { background: var(--warn); } .card.crit .gauge i { background: var(--crit); } .card.block .gauge i { background: var(--block); }
+  .gauge .mk { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .35; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .meta b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  canvas { width: 100%; height: 70px; display: block; margin-top: 10px; }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; align-self: start; }
+  aside h2 { font-size: 14px; margin: 0 0 10px; }
+  #log { list-style: none; margin: 0; padding: 0; max-height: 520px; overflow: auto; }
+  #log li { font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  #log time { display: block; font-size: 11px; color: var(--muted); }
+  .empty { color: var(--muted); font-size: 14px; padding: 30px; text-align: center; background: var(--panel);
+           border: 1px dashed var(--line); border-radius: 12px; grid-column: 1 / -1; }
+  h2.sect { font-size: 16px; margin: 26px 0 12px; } h2.sect small { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .reports { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .rep { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; grid-template-columns: 84px 1fr; gap: 12px; }
+  .rep.done { opacity: .6; }
+  .rep img, .rep .noimg { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; background: var(--off-bg); display: grid; place-items: center; font-size: 28px; }
+  .rep h3 { margin: 4px 0 2px; font-size: 14px; } .rep .sub { font-size: 12px; color: var(--muted); }
+  .rep p { margin: 4px 0 0; font-size: 13px; } .rep a { color: var(--accent); font-size: 12px; font-weight: 600; }
+  .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .acts button { padding: 6px 10px; font-size: 12px; }
+  .done-box { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--ok-bg); color: var(--ok); font-size: 12px; display: flex; gap: 8px; align-items: center; }
+  .done-box img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; }
+  textarea { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); min-height: 64px; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--panel); color: var(--ink); width: min(440px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 4px; }
+  input { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Smart Drainage Guard <small>Municipal workers’ dashboard · Mangaung pilot</small></h1>
+  <div class="row">
+    <span id="conn" class="pill">Not connected</span>
+    <button onclick="openSettings()">Connect broker</button>
+    <button id="demoBtn" onclick="toggleDemo()">Start demo mode</button>
+  </div>
+</header>
+
+<main>
+  <section class="kpis">
+    <div class="kpi"><span>Drains online</span><b id="kOnline">0</b></div>
+    <div class="kpi"><span>Active alerts</span><b id="kAlerts">0</b></div>
+    <div class="kpi"><span>Highest level</span><b id="kMax">–</b></div>
+    <div class="kpi"><span>Open community reports</span><b id="kReports">0</b></div>
+    <div class="kpi"><span>Last reading</span><b id="kLast">–</b></div>
+  </section>
+  <div class="layout">
+    <section class="grid" id="grid">
+      <div class="empty" id="empty">No drains reporting yet. Connect to the MQTT broker, or start demo mode.</div>
+    </section>
+    <aside>
+      <h2>Alert log</h2>
+      <ul id="log"><li class="hint">Alerts appear here.</li></ul>
+    </aside>
+  </div>
+  <h2 class="sect">Community reports <small id="repSummary"></small></h2>
+  <section class="reports" id="reports"><div class="empty">No community reports yet. Residents send them from the community app (no login needed).</div></section>
+</main>
+
+<dialog id="settings">
+  <form method="dialog" onsubmit="connectFromForm(); return false;">
+    <h2 style="margin:0 0 4px;font-size:17px">Connect to MQTT broker</h2>
+    <div class="hint" style="margin:0">EMQX Cloud: address, port 8084 (WebSocket + TLS), path /mqtt. Workers sign in with the <b>sdg-worker</b> login so they can confirm jobs.</div>
+    <label>Cluster URL</label><input id="fHost" value="ec1d11f2.ala.eu-central-1.emqxsl.com" required>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Port</label><input id="fPort" value="8084"></div>
+      <div><label>Path</label><input id="fPath" value="/mqtt"></div>
+    </div>
+    <label>Username</label><input id="fUser" value="sdg-worker" autocomplete="username">
+    <label>Password</label><input id="fPass" type="password" autocomplete="current-password">
+    <label>Topic</label><input id="fTopic" value="sdg/#">
+    <div class="hint">Password is kept in this browser only and never saved in the file.</div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button type="button" onclick="settings.close()">Cancel</button>
+      <button class="primary" type="submit">Connect</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="jobDlg">
+  <form method="dialog" onsubmit="confirmJob(); return false;">
+    <h2 id="jobTitle" style="margin:0 0 4px;font-size:17px">Mark job as done</h2>
+    <div class="hint" id="jobSub" style="margin:0"></div>
+    <label>Your name (worker)</label><input id="jName" required placeholder="e.g. T. Mokoena">
+    <div id="doneFields">
+      <label>What was done?</label><textarea id="jNote" placeholder="e.g. Removed plastic and sand from the grate; water draining normally"></textarea>
+      <label>“After” photo (proof)</label><input id="jPhoto" type="file" accept="image/*" capture="environment">
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <button type="button" onclick="jobDlg.close()">Cancel</button>
+      <button class="primary" type="submit" id="jobBtn">Confirm</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+// ---------- thresholds (percent of drain capacity) ----------
+const WARN_PCT = 70, CRIT_PCT = 85;
+const OFFLINE_AFTER_S = 30;          // no reading for this long = offline
+const BLOCK_MIN_PCT = 40;            // only judge drainage when this full
+const BLOCK_RATIO = 0.15;            // draining < 15% of current level per minute = slow
+const HISTORY_S = 600;               // keep 10 minutes of points
+
+const drains = {};                   // id -> state
+let client = null, demoTimer = null, demoStart = 0;
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+};
+
+// ---------- MQTT ----------
+function openSettings() {
+  ["Host","Port","Path","User","Topic"].forEach(f => { const v = store.get("sdg_"+f); if (v) $("f"+f).value = v; });
+  $("settings").showModal();
+}
+function connectFromForm() {
+  ["Host","Port","Path","User","Topic"].forEach(f => store.set("sdg_"+f, $("f"+f).value.trim()));
+  $("settings").close();
+  if (demoTimer) toggleDemo();
+  connect($("fHost").value.trim(), $("fPort").value.trim(), $("fPath").value.trim(),
+          $("fUser").value.trim(), $("fPass").value, $("fTopic").value.trim() || "sdg/drain/#");
+}
+function connect(host, port, path, user, pass, topic) {
+  if (client) client.end(true);
+  const proto = (host === "localhost" || host === "127.0.0.1") && port !== "8884" ? "ws" : "wss";
+  const url = `${proto}://${host}:${port}${path}`;
+  setConn("Connecting…", "");
+  client = mqtt.connect(url, {
+    username: user || undefined, password: pass || undefined,
+    clientId: "sdg-dash-" + Math.random().toString(16).slice(2, 8),
+    reconnectPeriod: 3000, connectTimeout: 10000, clean: true
+  });
+  client.on("connect", () => { setConn("Live · " + host, "on"); client.subscribe([topic, "sdg/report/#", "sdg/status/#"], { qos: 0 }); addLog("Connected to broker", "ok"); });
+  client.on("reconnect", () => setConn("Reconnecting…", ""));
+  client.on("close", () => { if (!demoTimer) setConn("Disconnected", ""); });
+  client.on("error", e => { setConn("Error: " + e.message, ""); addLog("Broker error: " + e.message, "crit"); });
+  client.on("message", (t, buf) => handleMessage(t, buf.toString()));
+}
+function setConn(text, cls) { const p = $("conn"); p.textContent = text; p.className = "pill " + cls; }
+
+function handleMessage(topic, text) {
+  const parts = topic.split("/");               // sdg/drain/{id}/{kind}  or  sdg/report/{id}
+  if (parts[1] === "report") { handleReport(text); return; }
+  if (parts[1] === "status") { handleStatus(text); return; }
+  if (parts.length < 4) return;
+  const id = parts[2], kind = parts[3];
+  const d = getDrain(id);
+  if (kind === "status") { d.online = text === "online"; d.statusMsg = text; evaluate(d); return; }
+  if (kind !== "level") return;
+  let m; try { m = JSON.parse(text); } catch { return; }
+  d.name = m.name || d.name; d.max = m.max_cm || d.max;
+  d.rssi = m.rssi; d.floatHigh = !!m.float_high; d.simulated = !!m.simulated;
+  d.lastSeen = Date.now(); d.online = true; d.error = m.error || null;
+  if (typeof m.level_cm === "number") {
+    d.level = m.level_cm;
+    d.pct = typeof m.pct === "number" ? m.pct : m.level_cm / d.max * 100;
+    d.hist.push([Date.now() / 1000, d.level]);
+    const cutoff = Date.now() / 1000 - HISTORY_S;
+    while (d.hist.length && d.hist[0][0] < cutoff) d.hist.shift();
+    if (d.level > d.peak.level) d.peak = { level: d.level, t: Date.now() / 1000 };
+    // reset the peak once the drain is nearly empty, ready for the next storm
+    if (d.pct < 10) d.peak = { level: d.level, t: Date.now() / 1000 };
+  }
+  $("kLast").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  evaluate(d);
+}
+
+// ---------- drain state + alert rules ----------
+function getDrain(id) {
+  if (!drains[id]) {
+    drains[id] = { id, name: id, max: 30, level: null, pct: null, hist: [], peak: { level: 0, t: 0 },
+                   online: true, state: null, lastSeen: Date.now() };
+    $("empty").style.display = "none";
+    const el = document.createElement("article");
+    el.className = "card"; el.id = "card-" + id;
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><div><h3></h3><div class="id"></div></div><span class="badge"></span></div>
+      <div class="big"></div><div class="gauge"><i></i><span class="mk" style="left:${WARN_PCT}%"></span><span class="mk" style="left:${CRIT_PCT}%"></span></div>
+      <canvas width="560" height="140"></canvas>
+      <div class="meta"><span>Drain rate <b class="rate">–</b></span><span>Float switch <b class="flt">–</b></span>
+      <span>Signal <b class="sig">–</b></span><span>Updated <b class="upd">–</b></span></div>`;
+    $("grid").appendChild(el);
+  }
+  return drains[id];
+}
+
+// cm per minute over the last 60 s (negative = draining)
+function rate(d) {
+  const now = Date.now() / 1000, pts = d.hist.filter(p => p[0] >= now - 60);
+  if (pts.length < 3) return null;
+  const n = pts.length, mx = pts.reduce((s, p) => s + p[0], 0) / n, my = pts.reduce((s, p) => s + p[1], 0) / n;
+  let num = 0, den = 0;
+  pts.forEach(p => { num += (p[0] - mx) * (p[1] - my); den += (p[0] - mx) ** 2; });
+  return den ? num / den * 60 : null;
+}
+
+function classify(d) {
+  const now = Date.now() / 1000;
+  if (!d.online || now - d.lastSeen / 1000 > OFFLINE_AFTER_S) return ["off", "Offline", "b-off"];
+  if (d.error) return ["off", "Sensor error", "b-off"];
+  if (d.pct == null) return ["ok", "Waiting", "b-ok"];
+  // the two sensors disagree -> flag for inspection rather than raise a false alarm
+  if ((d.floatHigh && d.pct < 50) || (!d.floatHigh && d.pct > 98)) return ["block", "Sensor conflict", "b-block"];
+  if (d.pct >= CRIT_PCT) return ["crit", "Overflow risk", "b-crit"];
+  const r = rate(d);
+  const pastPeak = d.peak.level - d.level > d.max * 0.03 && now - d.peak.t > 45;
+  if (r != null && pastPeak && d.pct >= BLOCK_MIN_PCT && -r < BLOCK_RATIO * d.level)
+    return ["block", "Possible blockage", "b-block"];
+  if (d.pct >= WARN_PCT) return ["warn", "High level", "b-warn"];
+  return ["ok", "Normal", "b-ok"];
+}
+
+function evaluate(d) {
+  const [cls, label, badge] = classify(d);
+  if (d.state !== label) {
+    if (d.state !== null && d.state !== "Waiting" && label !== "Waiting") {
+      const msg = { "Overflow risk": "Spill-over alert", "Possible blockage": "Blockage alert: draining slowly",
+                    "High level": "High water level", "Offline": "Node offline", "Normal": "Back to normal",
+                    "Sensor conflict": "Ultrasonic and float switch disagree, inspect node", "Sensor error": "No echo from sensor" }[label] || label;
+      addLog(`${d.id} · ${d.name}: ${msg}`, cls);
+    }
+    d.state = label;
+  }
+  render(d, cls, label, badge);
+  renderKpis();
+}
+
+// ---------- rendering ----------
+function render(d, cls, label, badge) {
+  const el = $("card-" + d.id);
+  el.className = "card " + (cls === "ok" ? "" : cls);
+  el.querySelector("h3").textContent = d.name;
+  el.querySelector(".id").textContent = d.id + (d.simulated ? " · simulated" : "");
+  const b = el.querySelector(".badge"); b.textContent = label; b.className = "badge " + badge;
+  el.querySelector(".big").innerHTML = d.pct == null ? "–" :
+    `${Math.round(d.pct)}%<small> · ${d.level.toFixed(1)} of ${d.max} cm</small>`;
+  el.querySelector(".gauge i").style.width = Math.min(100, d.pct || 0) + "%";
+  const r = rate(d);
+  el.querySelector(".rate").textContent = r == null ? "–" : (r > 0 ? "+" : "") + r.toFixed(1) + " cm/min";
+  el.querySelector(".flt").textContent = d.floatHigh ? "HIGH" : "low";
+  el.querySelector(".sig").textContent = d.rssi != null ? d.rssi + " dBm" : "–";
+  el.querySelector(".upd").textContent = d.lastSeen ? Math.round((Date.now() - d.lastSeen) / 1000) + " s ago" : "–";
+  drawSpark(el.querySelector("canvas"), d, cls);
+}
+
+function drawSpark(cv, d, cls) {
+  const ctx = cv.getContext("2d"), W = cv.width, H = cv.height, css = getComputedStyle(document.documentElement);
+  ctx.clearRect(0, 0, W, H);
+  const pad = 6, y = v => H - pad - (v / d.max) * (H - 2 * pad);
+  [WARN_PCT, CRIT_PCT].forEach(p => {
+    ctx.strokeStyle = css.getPropertyValue("--line"); ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, y(d.max * p / 100)); ctx.lineTo(W, y(d.max * p / 100)); ctx.stroke();
+  });
+  ctx.setLineDash([]);
+  if (d.hist.length < 2) return;
+  const now = Date.now() / 1000, span = Math.min(HISTORY_S, Math.max(60, now - d.hist[0][0]));
+  const x = t => W - (now - t) / span * W;
+  const color = css.getPropertyValue({ ok: "--ok", warn: "--warn", crit: "--crit", block: "--block", off: "--off" }[cls]);
+  ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.lineJoin = "round";
+  ctx.beginPath(); d.hist.forEach((p, i) => i ? ctx.lineTo(x(p[0]), y(p[1])) : ctx.moveTo(x(p[0]), y(p[1]))); ctx.stroke();
+  ctx.globalAlpha = .12; ctx.fillStyle = color;
+  ctx.lineTo(x(d.hist[d.hist.length - 1][0]), H); ctx.lineTo(x(d.hist[0][0]), H); ctx.fill(); ctx.globalAlpha = 1;
+}
+
+function renderKpis() {
+  const list = Object.values(drains);
+  $("kOnline").textContent = list.filter(d => d.state !== "Offline").length + " / " + list.length;
+  $("kAlerts").textContent = list.filter(d => ["Overflow risk", "Possible blockage", "Sensor conflict", "Offline"].includes(d.state)).length;
+  const top = list.filter(d => d.pct != null).sort((a, b) => b.pct - a.pct)[0];
+  $("kMax").textContent = top ? `${Math.round(top.pct)}% · ${top.id}` : "–";
+}
+
+function addLog(text, cls) {
+  const log = $("log"); if (log.querySelector(".hint")) log.innerHTML = "";
+  const li = document.createElement("li");
+  const colors = { crit: "var(--crit)", block: "var(--block)", warn: "var(--warn)", off: "var(--off)", ok: "var(--ok)" };
+  li.innerHTML = `<time>${new Date().toLocaleTimeString()}</time><span style="color:${colors[cls] || "inherit"};font-weight:600">●</span> `;
+  li.appendChild(document.createTextNode(text));
+  log.prepend(li);
+}
+
+// re-check every few seconds so silent nodes turn "Offline"
+setInterval(() => Object.values(drains).forEach(evaluate), 3000);
+
+// ---------- community reports + job status ----------
+// Residents publish reports to sdg/report/{id} (community app, no login).
+// Only workers publish job status to sdg/status/{id}, so the public cannot mark jobs done.
+const reports = {}, statuses = {};
+const R_TYPES = { blocked: ["Blocked", "b-block"], overflowing: ["Overflowing", "b-crit"], damaged: ["Damaged / open", "b-warn"], other: ["Other", "b-off"] };
+const R_STATUS = { reported: ["New", "b-crit"], progress: ["Worker on the way", "b-warn"], cleared: ["Done", "b-ok"] };
+const statusOf = r => (statuses[r.id] || { status: r.status || "reported" });
+function handleReport(text) {
+  let r; try { r = JSON.parse(text); } catch { return; }
+  if (!r || !r.id) return;
+  if (!reports[r.id] && Date.now() - r.ts < 10 * 60 * 1000)
+    addLog(`New community report ${r.id}: ${(R_TYPES[r.type] || ["Issue"])[0]} at ${r.landmark || "GPS location"}`, r.severity === "high" ? "crit" : "block");
+  reports[r.id] = r; renderReports();
+}
+function handleStatus(text) {
+  let st; try { st = JSON.parse(text); } catch { return; }
+  if (!st || !st.id) return;
+  const prev = statuses[st.id];
+  if (!prev || prev.status !== st.status) addLog(`Report ${st.id}: ${(R_STATUS[st.status] || [st.status])[0]} (${st.by || "worker"})`, st.status === "cleared" ? "ok" : "warn");
+  statuses[st.id] = st; renderReports();
+}
+function escH(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function renderReports() {
+  const list = Object.values(reports), sev = { high: 0, medium: 1, low: 2 };
+  const done = r => statusOf(r).status === "cleared";
+  list.sort((a, b) => done(a) - done(b) || (sev[a.severity] ?? 1) - (sev[b.severity] ?? 1) || b.ts - a.ts);
+  const open = list.filter(r => !done(r)).length;
+  $("kReports").textContent = open;
+  $("repSummary").textContent = list.length ? `· ${open} open, ${list.length - open} done` : "";
+  if (!list.length) return;
+  $("reports").innerHTML = list.map(r => {
+    const st = statusOf(r);
+    const [tl, tc] = R_TYPES[r.type] || R_TYPES.other, [sl, sc] = R_STATUS[st.status] || R_STATUS.reported;
+    const when = new Date(r.ts).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    const map = r.lat != null ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lng}" target="_blank" rel="noopener">Directions ↗</a>` : "";
+    const id = escH(r.id);
+    let acts = "";
+    if (st.status === "reported") acts = `<div class="acts"><button onclick="openJob('${id}','progress')">🚶 On my way</button><button class="primary" onclick="openJob('${id}','cleared')">✅ Mark as done</button></div>`;
+    else if (st.status === "progress") acts = `<div class="sub" style="margin-top:6px">${escH(st.by)} is on the way</div><div class="acts"><button class="primary" onclick="openJob('${id}','cleared')">✅ Mark as done</button></div>`;
+    else acts = `<div class="done-box">${st.photo ? `<img src="${st.photo}" alt="After photo">` : ""}<div><b>Done by ${escH(st.by)}</b> · ${new Date(st.ts).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}${st.note ? "<br>" + escH(st.note) : ""}</div></div>`;
+    return `<article class="rep ${st.status === "cleared" ? "done" : ""}">
+      ${r.photo ? `<img src="${r.photo}" alt="Photo from resident">` : `<div class="noimg">🕳️</div>`}
+      <div><span class="badge ${tc}">${tl}</span> <span class="badge ${sc}">${sl}</span>
+        <h3>${escH(r.landmark || (r.lat != null ? r.lat + ", " + r.lng : "No location"))}</h3>
+        <div class="sub">${id} · ${escH(r.severity)} urgency · ${when} · reported by ${escH(r.reporter || "a resident")}</div>
+        ${r.note ? `<p>${escH(r.note)}</p>` : ""}${map}${acts}</div></article>`;
+  }).join("");
+}
+
+// ---------- worker actions ----------
+let jobId = null, jobMode = null;
+function openJob(id, mode) {
+  jobId = id; jobMode = mode;
+  const r = reports[id];
+  $("jobTitle").textContent = mode === "cleared" ? "Mark job as done" : "Tell the team you’re on the way";
+  $("jobSub").textContent = `${id} · ${r.landmark || "GPS location"}`;
+  $("doneFields").style.display = mode === "cleared" ? "block" : "none";
+  $("jobBtn").textContent = mode === "cleared" ? "Confirm done" : "I’m on my way";
+  $("jName").value = store.get("sdg_worker_name") || "";
+  $("jNote").value = ""; $("jPhoto").value = "";
+  $("jobDlg").showModal();
+}
+function shrinkPhoto(file) {
+  return new Promise(res => {
+    if (!file) return res(null);
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 640 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(img.src); res(c.toDataURL("image/jpeg", 0.6));
+    };
+    img.onerror = () => res(null);
+    img.src = URL.createObjectURL(file);
+  });
+}
+async function confirmJob() {
+  const by = $("jName").value.trim(); if (!by) return;
+  store.set("sdg_worker_name", by);
+  const st = { id: jobId, status: jobMode, by, ts: Date.now() };
+  if (jobMode === "cleared") { st.note = $("jNote").value.trim(); st.photo = await shrinkPhoto($("jPhoto").files[0]); }
+  $("jobDlg").close();
+  if (client && client.connected) {
+    // retained: residents who open the app later still see the latest status
+    client.publish("sdg/status/" + jobId, JSON.stringify(st), { qos: 1, retain: true }, err => { if (err) addLog("Could not save status: " + err.message, "crit"); });
+  }
+  handleStatus(JSON.stringify(st));   // show it immediately (demo mode or while the broker echoes it)
+}
+
+// ---------- demo mode: in-browser storm, no broker or internet needed ----------
+const DEMO = [
+  ["D02", "Zastron St stormwater inlet", 30, 0.62, 1.0],
+  ["D03", "Botshabelo Section H catch basin", 30, 0.80, 0.12],
+  ["D04", "Thaba Nchu taxi rank gutter", 25, 1.02, 0.6],
+];
+function demoLevel(t, peak, speed, max) {
+  t = t % 360;
+  const f = t < 60 ? peak * Math.sin(t / 60 * Math.PI / 2) : peak * Math.exp(-speed * (t - 60) / 60);
+  return Math.max(0, f + (Math.random() - .5) * .02) * max;
+}
+function toggleDemo() {
+  if (demoTimer) { clearInterval(demoTimer); demoTimer = null; $("demoBtn").textContent = "Start demo mode"; setConn("Demo stopped", ""); return; }
+  if (client) { client.end(true); client = null; }
+  demoStart = Date.now() / 1000; setConn("Demo mode · simulated data", "demo");
+  $("demoBtn").textContent = "Stop demo";
+  const tick = () => {
+    const t = Date.now() / 1000 - demoStart;
+    DEMO.forEach(([id, name, max, peak, speed]) => {
+      const lvl = demoLevel(t, peak, speed, max);
+      handleMessage(`sdg/drain/${id}/level`, JSON.stringify({ id, name, max_cm: max, level_cm: +lvl.toFixed(1),
+        pct: +(lvl / max * 100).toFixed(1), float_high: lvl / max > .85, rssi: -60 - Math.round(Math.random() * 12), simulated: true }));
+    });
+  };
+  tick(); demoTimer = setInterval(tick, 2000);
+  const now = Date.now();
+  [{ id: "RDEMO01", type: "blocked", severity: "high", lat: -29.1197, lng: 26.2140, landmark: "Corner of Zastron St & Kellner St, Bloemfontein",
+     note: "Plastic and sand filling the grate, water standing on the road", reporter: "Thandi (resident)", ts: now - 4 * 60000 },
+   { id: "RDEMO02", type: "damaged", severity: "medium", lat: -29.2410, lng: 26.7050, landmark: "Botshabelo Section H, next to the clinic",
+     note: "Grate cover missing, danger to pedestrians", reporter: "a resident", ts: now - 35 * 60000 },
+   { id: "RDEMO03", type: "blocked", severity: "low", lat: -29.2167, lng: 26.8333, landmark: "Thaba Nchu taxi rank gutter",
+     note: "Leaves and silt in the gutter", reporter: "Sipho (resident)", ts: now - 3 * 3600000 }
+  ].forEach(r => { reports[r.id] = { ...r, simulated: true }; });
+  statuses.RDEMO01 = { id: "RDEMO01", status: "progress", by: "T. Mokoena", ts: now - 2 * 60000 };
+  statuses.RDEMO03 = { id: "RDEMO03", status: "cleared", by: "K. Molefe", ts: now - 2 * 3600000, note: "Cleared leaves and silt with a spade; water flowing" };
+  renderReports();
+}
+</script>
+</body>
+</html>
